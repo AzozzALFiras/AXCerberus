@@ -377,4 +377,4 @@ This software is proprietary and confidential. Unauthorized copying, distributio
 modification, or use of this software, in whole or in part, is strictly prohibited
 without prior written permission from AevonX.
 
-For licensing inquiries, contact: license@aevonx.com
+For licensing inquiries, contact: contact@aevonx.app
