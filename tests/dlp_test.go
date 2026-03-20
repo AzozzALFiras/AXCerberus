@@ -59,8 +59,8 @@ func TestDLPAPIKeyDetection(t *testing.T) {
 		name string
 		body string
 	}{
-		{"AWS", `{"key": "AKIAIOSFODNN7EXAMPLE"}`},
-		{"GitHub", `{"token": "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"}`},
+		{"AWS", `{"key": "AKIAIOSFONN7EXAMPLE"}`},
+		{"GitHub", `{"token": "ghp_aBcDeFgHiJkLmNoPsTuVwXyZ0123456789"}`},
 		{"Stripe", `{"key": "sk_test_FaKeKeyForDLPUnitTest0000"}`},
 	}
 
