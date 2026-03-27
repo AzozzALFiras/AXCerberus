@@ -37,6 +37,7 @@ type Engine struct {
 	ddosLevel          atomic.Int32
 
 	startTime time.Time
+	Events    *EventBus
 
 	// Ring buffers for logs
 	accessLog    [500]AccessLogEntry
@@ -165,6 +166,7 @@ func New() *Engine {
 		responseTimes:  make([]float64, 0, 10000),
 		qps:            newQPSTracker(),
 		startTime:      time.Now(),
+		Events:         NewEventBus(),
 	}
 }
 

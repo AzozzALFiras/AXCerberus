@@ -205,6 +205,21 @@ func (s *Server) buildHandler() error {
 		}
 	}
 
+	// Threat intelligence feed blocking
+	if s.deps.ThreatFeed != nil {
+		middlewares = append(middlewares, s.deps.ThreatFeed.Middleware)
+	}
+
+	// Bot enforcement (blocks malicious bots before rate limiting)
+	if s.deps.Bot != nil {
+		middlewares = append(middlewares, s.deps.Bot.Middleware)
+	}
+
+	// JS challenge (for suspicious bots tagged by bot enforcement)
+	if s.deps.Challenge != nil {
+		middlewares = append(middlewares, s.deps.Challenge.Middleware)
+	}
+
 	// Rate limiting
 	if s.deps.RateLimiter != nil {
 		middlewares = append(middlewares, s.deps.RateLimiter.Middleware)
@@ -225,6 +240,42 @@ func (s *Server) buildHandler() error {
 		middlewares = append(middlewares, s.deps.Credential.Middleware)
 	}
 
+	// SSRF prevention
+	if s.deps.SSRF != nil {
+		middlewares = append(middlewares, s.deps.SSRF.Middleware)
+	}
+
+	// Session tracking (ATO, impossible travel)
+	if s.deps.Session != nil {
+		middlewares = append(middlewares, s.deps.Session.Middleware)
+	}
+
+	// API security (body size, content-type, GraphQL depth)
+	if s.deps.APISec != nil {
+		middlewares = append(middlewares, s.deps.APISec.Middleware)
+	}
+
+	// Anomaly detection (baseline deviation)
+	if s.deps.Anomaly != nil {
+		middlewares = append(middlewares, s.deps.Anomaly.Middleware)
+	}
+
+	// Custom rule DSL (user-defined rules)
+	if s.deps.RuleDSL != nil {
+		middlewares = append(middlewares, s.deps.RuleDSL.Middleware)
+	}
+
+	// Virtual patching (regex-based emergency patches)
+	if s.deps.VPatch != nil {
+		middlewares = append(middlewares, s.deps.VPatch.Middleware)
+	}
+
+	// URL allowlist — skip WAF for allowlisted paths
+	if cfg.URLAllowlist != "" {
+		allowPrefixes := splitTrim(cfg.URLAllowlist)
+		middlewares = append(middlewares, urlAllowlistMiddleware(allowPrefixes))
+	}
+
 	// WAF engine
 	wafEngine, err := waf.Build(cfg, s.deps.Logger, s.deps.GeoIP, s.deps.Bot, s.deps.Stats)
 	if err != nil {
@@ -237,6 +288,11 @@ func (s *Server) buildHandler() error {
 	// DLP scanner (response middleware — wraps outgoing responses)
 	if s.deps.DLP != nil {
 		middlewares = append(middlewares, s.deps.DLP.Middleware)
+	}
+
+	// Security response headers
+	if s.deps.Headers != nil {
+		middlewares = append(middlewares, s.deps.Headers.Middleware)
 	}
 
 	// Compose the chain and apply to reverse proxy
@@ -282,6 +338,21 @@ func loggingMiddleware(deps *Deps) pipeline.Middleware {
 			if deps.Stats != nil {
 				deps.Stats.RecordResponseTime(float64(durationMs))
 			}
+		})
+	}
+}
+
+func urlAllowlistMiddleware(prefixes []string) pipeline.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, prefix := range prefixes {
+				if strings.HasPrefix(r.URL.Path, prefix) {
+					// Mark as allowlisted so WAF middleware can skip
+					r.Header.Set("X-AXCerberus-Allowlisted", "true")
+					break
+				}
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

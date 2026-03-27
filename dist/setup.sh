@@ -150,7 +150,21 @@ with open('${CONFIG_FILE}', 'w') as f: json.dump(data, f, indent=4)
 fi
 
 # ---------------------------------------------------------------------------
-# 5 — Create IP list files
+# 5 — Deploy WAF rules
+# ---------------------------------------------------------------------------
+RULES_SRC_DIR="$(dirname "$(realpath "$0")")/rules"
+RULES_DST_DIR="${CONF_DIR}/rules"
+if [ -d "${RULES_SRC_DIR}" ] && [ "$(ls -1 "${RULES_SRC_DIR}"/*.conf 2>/dev/null | wc -l)" -gt 0 ]; then
+    mkdir -p "${RULES_DST_DIR}"
+    cp "${RULES_SRC_DIR}"/*.conf "${RULES_DST_DIR}/"
+    chown -R "${SERVICE_USER}:${SERVICE_USER}" "${RULES_DST_DIR}" 2>/dev/null || true
+    log_ok "WAF rules deployed ($(ls -1 "${RULES_DST_DIR}"/*.conf | wc -l) files)"
+else
+    log_warn "No WAF rule files found in dist/rules/"
+fi
+
+# ---------------------------------------------------------------------------
+# 6 — Create IP list files
 # ---------------------------------------------------------------------------
 touch "${CONF_DIR}/ip_allowlist.avx" "${CONF_DIR}/ip_blocklist.avx" 2>/dev/null || true
 

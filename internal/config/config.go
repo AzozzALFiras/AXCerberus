@@ -87,6 +87,48 @@ type Config struct {
 	// ── SSRF Prevention ──────────────────────────────────────────
 	SSRFEnabled bool
 
+	// ── Threat Intelligence ─────────────────────────────────────
+	ThreatFeedEnabled  bool
+	ThreatFeedInterval int // seconds between feed refreshes
+
+	// ── API Security ────────────────────────────────────────────
+	APISecEnabled        bool
+	APISecMaxBodySize    int64  // bytes
+	APISecEnforceContentType bool
+	APISecGraphQLEnabled bool
+	APISecGraphQLMaxDepth int
+	APISecPrefix         string
+
+	// ── Security Headers ────────────────────────────────────────
+	SecurityHeadersEnabled bool
+	CSPPolicy              string // Content-Security-Policy value
+	XFrameOptions          string // DENY, SAMEORIGIN, or empty
+
+	// ── Challenge System ────────────────────────────────────────
+	ChallengeEnabled  bool
+	ChallengeDuration int // seconds
+	ChallengeThreshold int // bot score threshold
+
+	// ── Virtual Patching ────────────────────────────────────────
+	VPatchEnabled bool
+	VPatchFile    string // path to vpatches.json
+
+	// ── Anomaly Detection ───────────────────────────────────────
+	AnomalyEnabled         bool
+	AnomalyWindowMinutes   int
+	AnomalyDeviationFactor float64
+	AnomalyMinSamples      int
+
+	// ── Session Tracking ────────────────────────────────────────
+	SessionEnabled       bool
+	SessionCookieName    string
+	SessionMaxPerMinute  int
+	SessionATOEnabled    bool
+
+	// ── Custom Rules ────────────────────────────────────────────
+	CustomRulesEnabled bool
+	CustomRulesFile    string // path to custom_rules.json
+
 	// ── Alerts ───────────────────────────────────────────────────
 	AlertsEnabled         bool
 	AlertWebhookURL       string
@@ -158,6 +200,38 @@ func Default() *Config {
 		DLPMode:        "log",
 
 		SSRFEnabled: true,
+
+		APISecEnabled:           false,
+		APISecMaxBodySize:       1 << 20, // 1MB
+		APISecEnforceContentType: true,
+		APISecGraphQLEnabled:    false,
+		APISecGraphQLMaxDepth:   10,
+		APISecPrefix:            "/api",
+
+		ThreatFeedEnabled:  false,
+		ThreatFeedInterval: 3600,
+
+		SecurityHeadersEnabled: true,
+		XFrameOptions:          "DENY",
+
+		VPatchEnabled: false,
+		VPatchFile:    "/etc/aevonx/plugins/axcerberus/vpatches.json",
+
+		AnomalyEnabled:         false,
+		AnomalyWindowMinutes:   60,
+		AnomalyDeviationFactor: 3.0,
+		AnomalyMinSamples:      100,
+
+		SessionEnabled:      false,
+		SessionMaxPerMinute: 120,
+		SessionATOEnabled:   true,
+
+		CustomRulesEnabled: false,
+		CustomRulesFile:    "/etc/aevonx/plugins/axcerberus/custom_rules.json",
+
+		ChallengeEnabled:   false,
+		ChallengeDuration:  3600,
+		ChallengeThreshold: 60,
 
 		AlertsEnabled:          false,
 		AlertMaxPerHour:        10,
@@ -416,6 +490,74 @@ func applyField(cfg *Config, key string, val any) {
 	// SSRF
 	case "ssrf_enabled":
 		cfg.SSRFEnabled = toBool(val)
+
+	// Challenge
+	case "challenge_enabled":
+		cfg.ChallengeEnabled = toBool(val)
+	case "challenge_duration":
+		cfg.ChallengeDuration = toInt(val)
+	case "challenge_threshold":
+		cfg.ChallengeThreshold = toInt(val)
+
+	// API Security
+	case "apisec_enabled":
+		cfg.APISecEnabled = toBool(val)
+	case "apisec_max_body_size":
+		cfg.APISecMaxBodySize = int64(toInt(val))
+	case "apisec_enforce_content_type":
+		cfg.APISecEnforceContentType = toBool(val)
+	case "apisec_graphql_enabled":
+		cfg.APISecGraphQLEnabled = toBool(val)
+	case "apisec_graphql_max_depth":
+		cfg.APISecGraphQLMaxDepth = toInt(val)
+	case "apisec_prefix":
+		cfg.APISecPrefix = toString(val)
+
+	// Threat Feed
+	case "threat_feed_enabled":
+		cfg.ThreatFeedEnabled = toBool(val)
+	case "threat_feed_interval":
+		cfg.ThreatFeedInterval = toInt(val)
+
+	// Security Headers
+	case "security_headers_enabled":
+		cfg.SecurityHeadersEnabled = toBool(val)
+	case "csp_policy":
+		cfg.CSPPolicy = toString(val)
+	case "x_frame_options":
+		cfg.XFrameOptions = toString(val)
+
+	// Virtual Patching
+	case "vpatch_enabled":
+		cfg.VPatchEnabled = toBool(val)
+	case "vpatch_file":
+		cfg.VPatchFile = toString(val)
+
+	// Anomaly Detection
+	case "anomaly_enabled":
+		cfg.AnomalyEnabled = toBool(val)
+	case "anomaly_window_minutes":
+		cfg.AnomalyWindowMinutes = toInt(val)
+	case "anomaly_deviation_factor":
+		cfg.AnomalyDeviationFactor = toFloat(val)
+	case "anomaly_min_samples":
+		cfg.AnomalyMinSamples = toInt(val)
+
+	// Session Tracking
+	case "session_enabled":
+		cfg.SessionEnabled = toBool(val)
+	case "session_cookie_name":
+		cfg.SessionCookieName = toString(val)
+	case "session_max_per_minute":
+		cfg.SessionMaxPerMinute = toInt(val)
+	case "session_ato_enabled":
+		cfg.SessionATOEnabled = toBool(val)
+
+	// Custom Rules
+	case "custom_rules_enabled":
+		cfg.CustomRulesEnabled = toBool(val)
+	case "custom_rules_file":
+		cfg.CustomRulesFile = toString(val)
 
 	// Alerts
 	case "alerts_enabled":

@@ -11,9 +11,14 @@ import (
 	"time"
 
 	"axcerberus/internal/alert"
+	"axcerberus/internal/anomaly"
+	"axcerberus/internal/compliance"
 	"axcerberus/internal/credential"
 	"axcerberus/internal/ddos"
 	"axcerberus/internal/honeypot"
+	"axcerberus/internal/ruledsl"
+	"axcerberus/internal/session"
+	"axcerberus/internal/threatfeed"
 )
 
 // APIServer serves the stats API on localhost.
@@ -27,6 +32,11 @@ type APIServer struct {
 	ddos       *ddos.Shield
 	credential *credential.Detector
 	alerts     *alert.Dispatcher
+	threatFeed *threatfeed.Manager
+	anomaly    *anomaly.Detector
+	session    *session.Tracker
+	ruleDSL    *ruledsl.Engine
+	wafState   *compliance.WAFState
 }
 
 // NewAPIServer creates a stats API server.
@@ -60,6 +70,27 @@ func NewAPIServer(engine *Engine, addr string) *APIServer {
 	mux.HandleFunc("/api/v1/logs/access", s.handleAccessLog)
 	mux.HandleFunc("/api/v1/logs/blocks", s.handleBlockLog)
 
+	// Real-time event stream (SSE)
+	mux.HandleFunc("/api/v1/stream/events", engine.Events.HandleSSE)
+
+	// Threat feed
+	mux.HandleFunc("/api/v1/threatfeed/status", s.handleThreatFeedStatus)
+	mux.HandleFunc("/api/v1/threatfeed/update", s.handleThreatFeedUpdate)
+
+	// Anomaly detection
+	mux.HandleFunc("/api/v1/anomaly/status", s.handleAnomalyStatus)
+
+	// Session tracking
+	mux.HandleFunc("/api/v1/session/status", s.handleSessionStatus)
+
+	// Custom rules
+	mux.HandleFunc("/api/v1/rules/list", s.handleRulesList)
+	mux.HandleFunc("/api/v1/rules/add", s.handleRulesAdd)
+	mux.HandleFunc("/api/v1/rules/remove", s.handleRulesRemove)
+
+	// Compliance
+	mux.HandleFunc("/api/v1/compliance/report", s.handleComplianceReport)
+
 	// Health
 	mux.HandleFunc("/healthz", s.handleHealth)
 
@@ -83,6 +114,31 @@ func (s *APIServer) SetModules(hp *honeypot.Engine, dd *ddos.Shield, cred *crede
 // SetAlerts sets the alert dispatcher reference.
 func (s *APIServer) SetAlerts(a *alert.Dispatcher) {
 	s.alerts = a
+}
+
+// SetThreatFeed sets the threat feed manager reference.
+func (s *APIServer) SetThreatFeed(tf *threatfeed.Manager) {
+	s.threatFeed = tf
+}
+
+// SetAnomaly sets the anomaly detector reference.
+func (s *APIServer) SetAnomaly(a *anomaly.Detector) {
+	s.anomaly = a
+}
+
+// SetSession sets the session tracker reference.
+func (s *APIServer) SetSession(st *session.Tracker) {
+	s.session = st
+}
+
+// SetRuleDSL sets the custom rule engine reference.
+func (s *APIServer) SetRuleDSL(r *ruledsl.Engine) {
+	s.ruleDSL = r
+}
+
+// SetWAFState sets the WAF state for compliance reporting.
+func (s *APIServer) SetWAFState(ws *compliance.WAFState) {
+	s.wafState = ws
 }
 
 // Serve starts the API server, blocking until ctx is cancelled.
@@ -200,6 +256,88 @@ func (s *APIServer) handleAccessLog(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) handleBlockLog(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 100)
 	writeJSON(w, map[string]any{"entries": s.engine.GetBlockLog(limit), "total": s.engine.blockLogLen})
+}
+
+func (s *APIServer) handleThreatFeedStatus(w http.ResponseWriter, r *http.Request) {
+	if s.threatFeed == nil {
+		writeJSON(w, map[string]any{"enabled": false})
+		return
+	}
+	writeJSON(w, s.threatFeed.GetStatus())
+}
+
+func (s *APIServer) handleThreatFeedUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.threatFeed == nil {
+		writeJSON(w, map[string]any{"enabled": false, "error": "threat feed not enabled"})
+		return
+	}
+	s.threatFeed.Update()
+	writeJSON(w, s.threatFeed.GetStatus())
+}
+
+func (s *APIServer) handleAnomalyStatus(w http.ResponseWriter, r *http.Request) {
+	if s.anomaly == nil {
+		writeJSON(w, map[string]any{"enabled": false})
+		return
+	}
+	writeJSON(w, s.anomaly.GetStats())
+}
+
+func (s *APIServer) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
+	if s.session == nil {
+		writeJSON(w, map[string]any{"enabled": false})
+		return
+	}
+	writeJSON(w, s.session.GetStats())
+}
+
+func (s *APIServer) handleRulesList(w http.ResponseWriter, r *http.Request) {
+	if s.ruleDSL == nil {
+		writeJSON(w, map[string]any{"enabled": false, "rules": []any{}})
+		return
+	}
+	writeJSON(w, map[string]any{"enabled": true, "rules": s.ruleDSL.ListRules()})
+}
+
+func (s *APIServer) handleRulesAdd(w http.ResponseWriter, r *http.Request) {
+	if s.ruleDSL == nil {
+		writeJSON(w, map[string]any{"error": "custom rules not enabled"})
+		return
+	}
+	id := r.URL.Query().Get("id")
+	raw := r.URL.Query().Get("rule")
+	if id == "" || raw == "" {
+		writeJSON(w, map[string]any{"error": "id and rule query params required"})
+		return
+	}
+	if err := s.ruleDSL.AddRule(id, raw); err != nil {
+		writeJSON(w, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "id": id})
+}
+
+func (s *APIServer) handleRulesRemove(w http.ResponseWriter, r *http.Request) {
+	if s.ruleDSL == nil {
+		writeJSON(w, map[string]any{"error": "custom rules not enabled"})
+		return
+	}
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeJSON(w, map[string]any{"error": "id query param required"})
+		return
+	}
+	removed := s.ruleDSL.RemoveRule(id)
+	writeJSON(w, map[string]any{"ok": removed, "id": id})
+}
+
+func (s *APIServer) handleComplianceReport(w http.ResponseWriter, r *http.Request) {
+	if s.wafState == nil {
+		writeJSON(w, map[string]any{"error": "compliance state not configured"})
+		return
+	}
+	report := compliance.GeneratePCIDSS(*s.wafState)
+	writeJSON(w, report)
 }
 
 func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {

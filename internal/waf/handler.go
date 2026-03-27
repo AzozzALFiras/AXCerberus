@@ -32,6 +32,13 @@ func newHandler(wafInstance coraza.WAF, next http.Handler, logs *logger.Logs,
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Skip WAF for URL-allowlisted paths
+	if r.Header.Get("X-AXCerberus-Allowlisted") == "true" {
+		r.Header.Del("X-AXCerberus-Allowlisted")
+		h.next.ServeHTTP(w, r)
+		return
+	}
+
 	requestID := uuid.New().String()
 	clientIP := realIP(r)
 	host := r.Host

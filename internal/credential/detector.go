@@ -2,8 +2,12 @@
 package credential
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +39,9 @@ type Detector struct {
 	// Per-IP tracking: IP → list of attempt times
 	ipAttempts  map[string][]time.Time
 
+	// Per-username tracking: username → list of attempt times
+	userAttempts map[string][]time.Time
+
 	// Blocked IPs
 	blockedIPs  map[string]time.Time
 
@@ -51,12 +58,13 @@ type Detector struct {
 // New creates a credential stuffing detector.
 func New(loginPaths []string, maxPerIP, maxPerUser int) *Detector {
 	d := &Detector{
-		loginPaths: loginPaths,
-		maxPerIP:   maxPerIP,
-		maxPerUser: maxPerUser,
-		ipAttempts: make(map[string][]time.Time),
-		blockedIPs: make(map[string]time.Time),
-		stopCh:     make(chan struct{}),
+		loginPaths:   loginPaths,
+		maxPerIP:     maxPerIP,
+		maxPerUser:   maxPerUser,
+		ipAttempts:   make(map[string][]time.Time),
+		userAttempts: make(map[string][]time.Time),
+		blockedIPs:   make(map[string]time.Time),
+		stopCh:       make(chan struct{}),
 	}
 	go d.cleanup()
 	return d
@@ -79,11 +87,30 @@ func (d *Detector) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Record the attempt
+		// Extract username from request body for per-user tracking
+		username := ""
+		if r.Body != nil && d.maxPerUser > 0 {
+			body, err := io.ReadAll(r.Body)
+			if err == nil && len(body) > 0 {
+				username = extractUsername(body, r.Header.Get("Content-Type"))
+				// Restore the body for downstream handlers
+				r.Body = io.NopCloser(bytes.NewReader(body))
+			}
+		}
+
+		// Record per-IP attempt
 		blocked := d.recordAttempt(ip)
 		if blocked {
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
+		}
+
+		// Record per-username attempt
+		if username != "" {
+			if d.recordUserAttempt(ip, username) {
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
+			}
 		}
 
 		// Use response recorder to check status code
@@ -153,6 +180,70 @@ func (d *Detector) recordAttempt(ip string) bool {
 	return false
 }
 
+// recordUserAttempt records a per-username login attempt and returns true if blocked.
+func (d *Detector) recordUserAttempt(ip, username string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-1 * time.Hour)
+
+	attempts := d.userAttempts[username]
+	valid := attempts[:0]
+	for _, t := range attempts {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+	valid = append(valid, now)
+	d.userAttempts[username] = valid
+
+	if len(valid) > d.maxPerUser {
+		d.blockedIPs[ip] = now
+		d.attacksDetected++
+		if d.OnBlock != nil {
+			go d.OnBlock(ip, "credential_stuffing_per_user:"+username)
+		}
+		return true
+	}
+	return false
+}
+
+// extractUsername tries to extract a username from a POST body.
+// Supports form-encoded and JSON payloads.
+func extractUsername(body []byte, contentType string) string {
+	ct := strings.ToLower(contentType)
+
+	// JSON body
+	if strings.Contains(ct, "application/json") {
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err == nil {
+			for _, key := range []string{"username", "email", "user", "login", "name"} {
+				if val, ok := payload[key]; ok {
+					if s, ok := val.(string); ok && s != "" {
+						return s
+					}
+				}
+			}
+		}
+		return ""
+	}
+
+	// Form-encoded body
+	if strings.Contains(ct, "application/x-www-form-urlencoded") {
+		values, err := url.ParseQuery(string(body))
+		if err == nil {
+			for _, key := range []string{"username", "email", "user", "login", "name"} {
+				if val := values.Get(key); val != "" {
+					return val
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
 // GetStats returns current credential protection stats.
 func (d *Detector) GetStats() Stats {
 	d.mu.Lock()
@@ -178,6 +269,11 @@ func (d *Detector) cleanup() {
 			for ip, attempts := range d.ipAttempts {
 				if len(attempts) > 0 && attempts[len(attempts)-1].Before(cutoff) {
 					delete(d.ipAttempts, ip)
+				}
+			}
+			for user, attempts := range d.userAttempts {
+				if len(attempts) > 0 && attempts[len(attempts)-1].Before(cutoff) {
+					delete(d.userAttempts, user)
 				}
 			}
 			for ip, blockedAt := range d.blockedIPs {

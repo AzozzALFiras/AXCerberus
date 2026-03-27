@@ -39,7 +39,56 @@
         "waf.allowlist.add",
         "waf.allowlist.remove",
 
-        "waf.config.show"
+        "waf.config.show",
+        "waf.config.all",
+        "waf.config.set",
+
+        "waf.stats.response_times",
+        "waf.stats.status_codes",
+        "waf.stats.bot_details",
+
+        "waf.alerts.recent",
+
+        "waf.logs.access",
+        "waf.logs.blocks",
+
+        "waf.geoip.list",
+        "waf.geoip.add",
+        "waf.geoip.remove",
+
+        "waf.service.start",
+        "waf.service.stop",
+        "waf.service.restart",
+        "waf.service.reload",
+
+        "waf.domains.list",
+        "waf.domains.add",
+        "waf.domains.remove",
+        "waf.domains.enable",
+        "waf.domains.disable",
+        "waf.domains.sync",
+        "waf.domains.detect_server",
+
+        "waf.threatfeed.status",
+        "waf.threatfeed.update",
+
+        "waf.vpatch.list",
+        "waf.vpatch.apply",
+        "waf.vpatch.remove",
+
+        "waf.logs.export",
+        "waf.config.backup",
+        "waf.config.restore",
+        "waf.config.list_backups",
+
+        "waf.anomaly.status",
+        "waf.session.status",
+
+        "waf.rules.list",
+        "waf.rules.add",
+        "waf.rules.remove",
+
+        "waf.compliance.report"
     ],
 
     "health_check": {
