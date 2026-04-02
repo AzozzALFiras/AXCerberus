@@ -2,7 +2,7 @@
     "name": "AXCerberus WAF",
     "slug": "axcerberus",
     "description": "Enterprise-grade Web Application Firewall with DDoS protection, honeypot traps, credential stuffing detection, DLP, and SSRF prevention",
-    "version": "1.0.0",
+    "version": "1.0.1Beta",
     "icon": "shield.lefthalf.filled",
 
     "binary": "/usr/local/bin/axcerberus exec",
