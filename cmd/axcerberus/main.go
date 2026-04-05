@@ -78,9 +78,12 @@ func main() {
 		log.Fatalf("fatal: open log files: %v", err)
 	}
 
-	// GeoIP
+	// GeoIP — auto-download free DB-IP Lite database if missing
 	var geoDB *geoip.DB
 	if cfg.GeoIPDBPath != "" {
+		if err := geoip.EnsureDB(cfg.GeoIPDBPath); err != nil {
+			logs.Warning.Warn("geoip_auto_download_failed", "error", err.Error())
+		}
 		geoDB, err = geoip.Open(cfg.GeoIPDBPath)
 		if err != nil {
 			logs.Warning.Warn("geoip_disabled", "reason", err.Error())

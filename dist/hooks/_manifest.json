@@ -2,15 +2,13 @@
     "name": "AXCerberus WAF",
     "slug": "axcerberus",
     "description": "Enterprise-grade Web Application Firewall with DDoS protection, honeypot traps, credential stuffing detection, DLP, and SSRF prevention",
-    "version": "1.0.1Beta",
+    "version": "1.0.0",
     "icon": "shield.lefthalf.filled",
-
     "binary": "/usr/local/bin/axcerberus exec",
     "arg_style": "positional",
     "service_name": "axcerberus",
     "config_dir": "/etc/aevonx/plugins/axcerberus",
     "hooks_dir": "/etc/aevonx/hooks/axcerberus",
-
     "allowed_actions": [
         "waf.stats.overview",
         "waf.stats.blocked_today",
@@ -22,45 +20,32 @@
         "waf.stats.top_attackers",
         "waf.stats.top_uris",
         "waf.stats.domains",
-
         "waf.ddos.status",
-
         "waf.honeypot.hits",
-
         "waf.credential.status",
-
         "waf.service.status",
-
         "waf.blocklist.list",
         "waf.blocklist.add",
         "waf.blocklist.remove",
-
         "waf.allowlist.list",
         "waf.allowlist.add",
         "waf.allowlist.remove",
-
         "waf.config.show",
         "waf.config.all",
         "waf.config.set",
-
         "waf.stats.response_times",
         "waf.stats.status_codes",
         "waf.stats.bot_details",
-
         "waf.alerts.recent",
-
         "waf.logs.access",
         "waf.logs.blocks",
-
         "waf.geoip.list",
         "waf.geoip.add",
         "waf.geoip.remove",
-
         "waf.service.start",
         "waf.service.stop",
         "waf.service.restart",
         "waf.service.reload",
-
         "waf.domains.list",
         "waf.domains.add",
         "waf.domains.remove",
@@ -68,36 +53,38 @@
         "waf.domains.disable",
         "waf.domains.sync",
         "waf.domains.detect_server",
-
+        "waf.stats.domain_countries",
+        "waf.stats.domain_timeline",
+        "waf.logs.domain_access",
+        "waf.logs.domain_blocks",
+        "waf.domains.block_ip",
+        "waf.domains.unblock_ip",
+        "waf.domains.blocked_ips",
+        "waf.domains.block_country",
+        "waf.domains.unblock_country",
+        "waf.domains.blocked_countries",
         "waf.threatfeed.status",
         "waf.threatfeed.update",
-
         "waf.vpatch.list",
         "waf.vpatch.apply",
         "waf.vpatch.remove",
-
         "waf.logs.export",
         "waf.config.backup",
         "waf.config.restore",
         "waf.config.list_backups",
-
         "waf.anomaly.status",
         "waf.session.status",
-
         "waf.rules.list",
         "waf.rules.add",
         "waf.rules.remove",
-
         "waf.compliance.report"
     ],
-
     "health_check": {
         "type": "systemd",
         "service_name": "axcerberus",
         "interval": 30,
         "success_pattern": "active"
     },
-
     "lifecycle": {
         "directories": [
             "/var/log/aevonx/plugins/axcerberus:0755",
@@ -109,7 +96,9 @@
             "exec_args": "-config /etc/aevonx/plugins/axcerberus/config.avx",
             "user": "aevonx-waf",
             "restart_sec": 5,
-            "capabilities": ["CAP_NET_BIND_SERVICE"]
+            "capabilities": [
+                "CAP_NET_BIND_SERVICE"
+            ]
         }
     }
 }

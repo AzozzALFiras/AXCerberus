@@ -26,7 +26,9 @@ type Tracker struct {
 
 	// Stats
 	activeSessions int64
+	totalTracked   int64
 	atoDetected    int64
+	rateLimited    int64
 }
 
 type sessionState struct {
@@ -104,6 +106,7 @@ func (t *Tracker) recordSession(id, ip, fingerprint string) string {
 			lastSeen:    now,
 		}
 		t.activeSessions++
+		t.totalTracked++
 		return ""
 	}
 
@@ -148,6 +151,7 @@ func (t *Tracker) recordSession(id, ip, fingerprint string) string {
 
 	// Rate limit check
 	if sess.minuteCount > t.cfg.MaxPerSession {
+		t.rateLimited++
 		if anomaly == "" {
 			anomaly = "session_rate_exceeded"
 		}
@@ -184,7 +188,9 @@ func (t *Tracker) GetStats() map[string]any {
 	return map[string]any{
 		"enabled":          t.cfg.Enabled,
 		"active_sessions":  len(t.sessions),
-		"ato_detected":     t.atoDetected,
+		"total_tracked":    t.totalTracked,
+		"ato_detections":   t.atoDetected,
+		"rate_limited":     t.rateLimited,
 	}
 }
 

@@ -49,10 +49,13 @@ type Engine struct {
 }
 
 type DomainStats struct {
-	TotalRequests   int64 `json:"total_requests"`
-	BlockedRequests int64 `json:"blocked_requests"`
-	BytesIn         int64 `json:"bytes_in"`
-	BytesOut        int64 `json:"bytes_out"`
+	TotalRequests   int64   `json:"total_requests"`
+	BlockedRequests int64   `json:"blocked_requests"`
+	BytesIn         int64   `json:"bytes_in"`
+	BytesOut        int64   `json:"bytes_out"`
+	LatencySum      float64 `json:"-"`
+	LatencyCount    int64   `json:"-"`
+	AvgLatencyMs    float64 `json:"avg_latency_ms"`
 }
 
 type AttackerInfo struct {
@@ -208,6 +211,23 @@ func (e *Engine) RecordRequest(host string, blocked bool, statusCode int, bytesI
 	}
 }
 
+// RecordRequestLatency records response time for a specific domain.
+func (e *Engine) RecordRequestLatency(host string, latencyMs float64) {
+	if host == "" || latencyMs <= 0 {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	ds, ok := e.domains[host]
+	if !ok {
+		ds = &DomainStats{}
+		e.domains[host] = ds
+	}
+	ds.LatencySum += latencyMs
+	ds.LatencyCount++
+	ds.AvgLatencyMs = ds.LatencySum / float64(ds.LatencyCount)
+}
+
 func (e *Engine) RecordAttack(ip, country, countryCode, attackType, uri string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -287,6 +307,7 @@ func (e *Engine) GetTimeline() []HourBucket {
 	for i := 0; i < 24; i++ {
 		idx := (now - 23 + i + 24) % 24
 		result[i] = e.timeline[idx]
+		result[i].Hour = idx
 	}
 	return result
 }
@@ -473,6 +494,120 @@ func splitCountryKey(key string) (code, name string) {
 		}
 	}
 	return key, key
+}
+
+// ---------------------------------------------------------------------------
+// Per-domain methods
+// ---------------------------------------------------------------------------
+
+// GetDomainTimeline derives a 24-hour timeline for a single domain from the
+// access log ring buffer. It returns buckets ordered oldest→newest.
+func (e *Engine) GetDomainTimeline(domain string) []HourBucket {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var buckets [24]HourBucket
+	for i := range buckets {
+		buckets[i].Hour = i
+	}
+
+	n := e.accessLogLen
+	for i := 0; i < n; i++ {
+		idx := (e.accessLogIdx - 1 - i + len(e.accessLog)) % len(e.accessLog)
+		entry := e.accessLog[idx]
+		if entry.Host != domain {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, entry.Timestamp)
+		if err != nil {
+			continue
+		}
+		h := t.Hour()
+		buckets[h].Total++
+		if entry.StatusCode == 403 {
+			buckets[h].Blocked++
+		} else {
+			buckets[h].Allowed++
+		}
+	}
+
+	// Rotate so the result is oldest→newest (same as GetTimeline).
+	now := time.Now().Hour()
+	result := make([]HourBucket, 24)
+	for i := 0; i < 24; i++ {
+		idx := (now - 23 + i + 24) % 24
+		result[i] = buckets[idx]
+		result[i].Hour = idx
+	}
+	return result
+}
+
+// GetDomainCountries aggregates country data from the access log for a domain.
+func (e *Engine) GetDomainCountries(domain string) []CountryCount {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	counts := make(map[string]int64)
+	n := e.accessLogLen
+	for i := 0; i < n; i++ {
+		idx := (e.accessLogIdx - 1 - i + len(e.accessLog)) % len(e.accessLog)
+		entry := e.accessLog[idx]
+		if entry.Host != domain || entry.CountryCode == "" {
+			continue
+		}
+		key := entry.CountryCode + "|" + entry.Country
+		counts[key]++
+	}
+
+	result := make([]CountryCount, 0, len(counts))
+	for key, c := range counts {
+		code, name := splitCountryKey(key)
+		result = append(result, CountryCount{CountryCode: code, CountryName: name, Count: c})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Count > result[j].Count })
+	return result
+}
+
+// GetDomainAccessLog returns access log entries filtered by domain.
+func (e *Engine) GetDomainAccessLog(domain string, limit int) []AccessLogEntry {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var result []AccessLogEntry
+	n := e.accessLogLen
+	for i := 0; i < n; i++ {
+		idx := (e.accessLogIdx - 1 - i + len(e.accessLog)) % len(e.accessLog)
+		entry := e.accessLog[idx]
+		if entry.Host != domain {
+			continue
+		}
+		result = append(result, entry)
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+	}
+	return result
+}
+
+// GetDomainBlockLog returns block log entries filtered by domain.
+func (e *Engine) GetDomainBlockLog(domain string, limit int) []BlockLogEntry {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var result []BlockLogEntry
+	n := e.blockLogLen
+	for i := 0; i < n; i++ {
+		idx := (e.blockLogIdx - 1 - i + len(e.blockLog)) % len(e.blockLog)
+		entry := e.blockLog[idx]
+		if entry.Host != domain {
+			continue
+		}
+		result = append(result, entry)
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+	}
+	return result
 }
 
 // ---------------------------------------------------------------------------

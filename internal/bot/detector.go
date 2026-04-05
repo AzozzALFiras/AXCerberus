@@ -116,7 +116,7 @@ func NewDetector() *Detector {
 // Detect analyses a User-Agent string and returns a classification.
 func (d *Detector) Detect(userAgent string) Result {
 	if userAgent == "" {
-		return Result{IsBot: true, Classification: ClassSuspicious, BotName: "empty-ua", Score: 80}
+		return Result{IsBot: true, Classification: ClassMalicious, BotName: "empty-ua", Score: 95}
 	}
 	for _, bp := range d.badBots {
 		if bp.pattern.MatchString(userAgent) {

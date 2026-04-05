@@ -61,7 +61,7 @@ noscript .error{color:#ef4444;font-weight:600}
   var redirect = "%s";
   var ip = "";
 
-  // Compute proof-of-work: find nonce such that SHA256(nonce+ip) starts with "0000"
+  // Compute proof-of-work: find nonce such that SHA256(nonce+ip) starts with "000000"
   // Since we don't know the server-side IP, we submit the computation
   // The server validates against its view of the client IP
 

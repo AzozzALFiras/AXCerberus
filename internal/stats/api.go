@@ -70,6 +70,12 @@ func NewAPIServer(engine *Engine, addr string) *APIServer {
 	mux.HandleFunc("/api/v1/logs/access", s.handleAccessLog)
 	mux.HandleFunc("/api/v1/logs/blocks", s.handleBlockLog)
 
+	// Per-domain stats
+	mux.HandleFunc("/api/v1/stats/domain-timeline", s.handleDomainTimeline)
+	mux.HandleFunc("/api/v1/stats/domain-countries", s.handleDomainCountries)
+	mux.HandleFunc("/api/v1/logs/access/domain", s.handleDomainAccessLog)
+	mux.HandleFunc("/api/v1/logs/blocks/domain", s.handleDomainBlockLog)
+
 	// Real-time event stream (SSE)
 	mux.HandleFunc("/api/v1/stream/events", engine.Events.HandleSSE)
 
@@ -256,6 +262,48 @@ func (s *APIServer) handleAccessLog(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) handleBlockLog(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 100)
 	writeJSON(w, map[string]any{"entries": s.engine.GetBlockLog(limit), "total": s.engine.blockLogLen})
+}
+
+// Per-domain endpoints
+
+func (s *APIServer) handleDomainTimeline(w http.ResponseWriter, r *http.Request) {
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		http.Error(w, `{"error":"domain required"}`, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"domain": domain, "timeline": s.engine.GetDomainTimeline(domain)})
+}
+
+func (s *APIServer) handleDomainCountries(w http.ResponseWriter, r *http.Request) {
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		http.Error(w, `{"error":"domain required"}`, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"domain": domain, "countries": s.engine.GetDomainCountries(domain)})
+}
+
+func (s *APIServer) handleDomainAccessLog(w http.ResponseWriter, r *http.Request) {
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		http.Error(w, `{"error":"domain required"}`, http.StatusBadRequest)
+		return
+	}
+	limit := queryInt(r, "limit", 100)
+	entries := s.engine.GetDomainAccessLog(domain, limit)
+	writeJSON(w, map[string]any{"entries": entries, "total": len(entries)})
+}
+
+func (s *APIServer) handleDomainBlockLog(w http.ResponseWriter, r *http.Request) {
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		http.Error(w, `{"error":"domain required"}`, http.StatusBadRequest)
+		return
+	}
+	limit := queryInt(r, "limit", 100)
+	entries := s.engine.GetDomainBlockLog(domain, limit)
+	writeJSON(w, map[string]any{"entries": entries, "total": len(entries)})
 }
 
 func (s *APIServer) handleThreatFeedStatus(w http.ResponseWriter, r *http.Request) {

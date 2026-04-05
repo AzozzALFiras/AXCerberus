@@ -74,7 +74,7 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 		}
 		e.recordHit(hit)
 
-		// Auto-block the IP
+		// Auto-block the IP immediately
 		if e.autoBlock {
 			e.mu.Lock()
 			e.blockedIPs[ip] = time.Now()
@@ -82,9 +82,12 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 			if e.OnBlock != nil {
 				e.OnBlock(ip)
 			}
+			// Block immediately — do not serve fake content
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
 		}
 
-		// Serve a fake response to waste attacker's time
+		// If auto-block is disabled, serve a fake response to waste attacker's time
 		serveFakePage(w, r.URL.Path)
 	})
 }

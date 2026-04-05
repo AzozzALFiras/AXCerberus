@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -172,6 +174,12 @@ func setDomainEnabled(args []string, enabled bool) (any, error) {
 	}
 	updateConfigDomains(domains)
 	reloadService()
+
+	// Switch nginx config: WAF proxy ↔ direct serving
+	if err := switchNginxConfig(domain, enabled); err != nil {
+		return map[string]any{"ok": true, "domain": domain, "enabled": enabled, "nginx_warning": err.Error()}, nil
+	}
+
 	return map[string]any{"ok": true, "domain": domain, "enabled": enabled}, nil
 }
 
@@ -213,3 +221,149 @@ func updateConfigDomains(domains []DomainInfo) {
 	value := strings.Join(enabled, ",")
 	_ = setConfigKey("domains", value)
 }
+
+// switchNginxConfig toggles a site between WAF proxy mode and direct serving.
+// enabled=true  → WAF proxy config (443 → WAF → backend)
+// enabled=false → restore original config (443 → direct)
+func switchNginxConfig(domain string, enabled bool) error {
+	// Find the site config file
+	siteConf := findNginxSiteConf(domain)
+	if siteConf == "" {
+		return nil // No nginx config found — skip silently
+	}
+
+	originals := confDir + "/nginx-originals"
+	origFile := filepath.Join(originals, filepath.Base(siteConf)+".orig")
+
+	if !enabled {
+		// DISABLE: restore original config (direct serving)
+		if _, err := os.Stat(origFile); err != nil {
+			return fmt.Errorf("no original config to restore for %s", domain)
+		}
+		data, err := os.ReadFile(origFile)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(siteConf, data, 0o644); err != nil {
+			return err
+		}
+	} else {
+		// ENABLE: generate WAF proxy config
+		if err := generateProxyConfig(domain, siteConf, origFile); err != nil {
+			return err
+		}
+	}
+
+	// Test and reload nginx
+	if out, err := exec.Command("nginx", "-t").CombinedOutput(); err != nil {
+		// Rollback on failure
+		if !enabled {
+			// Was trying to restore — put proxy config back
+			_ = generateProxyConfig(domain, siteConf, origFile)
+		} else if _, statErr := os.Stat(origFile); statErr == nil {
+			// Was trying to proxy — restore original
+			origData, _ := os.ReadFile(origFile)
+			_ = os.WriteFile(siteConf, origData, 0o644)
+		}
+		return fmt.Errorf("nginx test failed: %s", string(out))
+	}
+	_ = exec.Command("systemctl", "reload", "nginx").Run()
+	return nil
+}
+
+// findNginxSiteConf locates the nginx site config for a domain.
+func findNginxSiteConf(domain string) string {
+	// Try exact filename match first
+	candidates := []string{
+		"/etc/nginx/sites-available/" + domain,
+		"/etc/nginx/sites-available/" + domain + ".conf",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	// Search all site configs for server_name
+	entries, _ := os.ReadDir("/etc/nginx/sites-available")
+	re := regexp.MustCompile(`server_name\s+[^;]*\b` + regexp.QuoteMeta(domain) + `\b`)
+	for _, e := range entries {
+		if e.IsDir() || strings.HasSuffix(e.Name(), ".orig") || strings.HasSuffix(e.Name(), ".pre-waf") {
+			continue
+		}
+		path := "/etc/nginx/sites-available/" + e.Name()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if re.Match(data) {
+			return path
+		}
+	}
+	return ""
+}
+
+// generateProxyConfig creates a WAF proxy nginx config for a domain.
+func generateProxyConfig(domain, siteConf, origFile string) error {
+	// Read original to extract SSL paths
+	origData, err := os.ReadFile(origFile)
+	if err != nil {
+		return fmt.Errorf("cannot read original config: %w", err)
+	}
+
+	sslCert := extractNginxDirective(string(origData), "ssl_certificate")
+	sslKey := extractNginxDirective(string(origData), "ssl_certificate_key")
+	if sslCert == "" || sslKey == "" {
+		return fmt.Errorf("no SSL certs found in original config for %s", domain)
+	}
+
+	sslInclude := extractNginxDirective(string(origData), "include.*options-ssl")
+	sslDhparam := extractNginxDirective(string(origData), "ssl_dhparam")
+
+	var sb strings.Builder
+	sb.WriteString("# AXCerberus WAF Frontend — auto-generated\n")
+	sb.WriteString("server {\n")
+	sb.WriteString(fmt.Sprintf("    server_name %s;\n", domain))
+	sb.WriteString("    listen 443 ssl;\n")
+	sb.WriteString(fmt.Sprintf("    ssl_certificate %s;\n", sslCert))
+	sb.WriteString(fmt.Sprintf("    ssl_certificate_key %s;\n", sslKey))
+	if sslInclude != "" {
+		sb.WriteString(fmt.Sprintf("    include %s;\n", sslInclude))
+	}
+	if sslDhparam != "" {
+		sb.WriteString(fmt.Sprintf("    ssl_dhparam %s;\n", sslDhparam))
+	}
+	sb.WriteString("\n    location / {\n")
+	wafListen := getConfigKey("listen")
+	if wafListen == "" {
+		wafListen = "127.0.0.1:8080"
+	}
+	sb.WriteString(fmt.Sprintf("        proxy_pass http://%s;\n", wafListen))
+	sb.WriteString("        proxy_set_header Host $host;\n")
+	sb.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
+	sb.WriteString("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n")
+	sb.WriteString("        proxy_set_header X-Forwarded-Proto https;\n")
+	sb.WriteString("        proxy_http_version 1.1;\n")
+	sb.WriteString("        proxy_set_header Connection \"\";\n")
+	sb.WriteString("        proxy_connect_timeout 10s;\n")
+	sb.WriteString("        proxy_read_timeout 60s;\n")
+	sb.WriteString("        proxy_send_timeout 60s;\n")
+	sb.WriteString("    }\n}\n")
+	sb.WriteString("server {\n")
+	sb.WriteString("    listen 80;\n")
+	sb.WriteString(fmt.Sprintf("    server_name %s;\n", domain))
+	sb.WriteString("    return 301 https://$host$request_uri;\n")
+	sb.WriteString("}\n")
+
+	return os.WriteFile(siteConf, []byte(sb.String()), 0o644)
+}
+
+// extractNginxDirective extracts the value of a directive from nginx config text.
+func extractNginxDirective(conf, directive string) string {
+	re := regexp.MustCompile(`(?m)^\s*` + directive + `\s+([^;]+);`)
+	m := re.FindStringSubmatch(conf)
+	if len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+

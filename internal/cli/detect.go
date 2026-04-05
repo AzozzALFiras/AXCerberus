@@ -75,6 +75,15 @@ func detectApachePort() int {
 	return 80
 }
 
+// placeholderDomains contains default/template domains that should be
+// excluded from auto-detection (e.g. nginx default configs).
+var placeholderDomains = map[string]bool{
+	"_": true, "localhost": true, "localhost.localdomain": true,
+	"example.com": true, "example.org": true, "example.net": true,
+	"www.example.com": true, "www.example.org": true, "www.example.net": true,
+	"test.com": true, "test.localhost": true,
+}
+
 // detectServerDomains scans web server configs for domain names.
 func detectServerDomains() []DomainInfo {
 	ws := detectActiveWebServer()
@@ -114,7 +123,7 @@ func detectNginxDomains(ws string, seen map[string]bool) []DomainInfo {
 			for _, m := range matches {
 				for _, name := range strings.Fields(m[1]) {
 					name = strings.TrimSpace(name)
-					if name == "_" || name == "localhost" || name == "" {
+					if placeholderDomains[name] {
 						continue
 					}
 					if !seen[name] {
@@ -147,7 +156,7 @@ func detectApacheDomains(ws string, seen map[string]bool) []DomainInfo {
 			matches := serverNameRe.FindAllStringSubmatch(string(data), -1)
 			for _, m := range matches {
 				name := strings.TrimSpace(m[1])
-				if name == "" || name == "localhost" {
+				if placeholderDomains[name] {
 					continue
 				}
 				if !seen[name] {

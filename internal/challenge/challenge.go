@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	axhttp "axcerberus/internal/httputil"
 )
 
 // Config holds challenge system configuration.
@@ -58,7 +60,7 @@ func (s *System) Middleware(next http.Handler) http.Handler {
 
 		// Check for valid challenge cookie
 		cookie, err := r.Cookie(cookieName)
-		if err == nil && s.validateToken(cookie.Value, extractChallengeIP(r)) {
+		if err == nil && s.validateToken(cookie.Value, axhttp.RealIP(r)) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -86,13 +88,13 @@ func (s *System) Middleware(next http.Handler) http.Handler {
 func (s *System) handleVerify(w http.ResponseWriter, r *http.Request) {
 	answer := r.FormValue("answer")
 	nonce := r.FormValue("nonce")
-	ip := extractChallengeIP(r)
+	ip := axhttp.RealIP(r)
 
-	// Verify: SHA256(nonce + ip) must start with "0000"
+	// Verify: SHA256(nonce + ip) must start with "000000" (~16M operations)
 	hash := sha256.Sum256([]byte(nonce + ip))
 	hashHex := hex.EncodeToString(hash[:])
 
-	if !strings.HasPrefix(hashHex, "0000") || answer != hashHex[:16] {
+	if !strings.HasPrefix(hashHex, "000000") || answer != hashHex[:16] {
 		http.Error(w, "Challenge failed", http.StatusForbidden)
 		return
 	}
@@ -161,16 +163,3 @@ func isStaticAsset(path string) bool {
 	return false
 }
 
-func extractChallengeIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Real-IP"); xff != "" {
-		return strings.TrimSpace(xff)
-	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-	host, _, _ := strings.Cut(r.RemoteAddr, ":")
-	return host
-}

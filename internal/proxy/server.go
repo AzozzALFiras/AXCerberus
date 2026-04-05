@@ -14,7 +14,9 @@ import (
 
 	"axcerberus/internal/config"
 	"axcerberus/internal/geoip"
+	axhttp "axcerberus/internal/httputil"
 	"axcerberus/internal/pipeline"
+	"axcerberus/internal/stats"
 	"axcerberus/internal/waf"
 
 	"github.com/google/uuid"
@@ -125,14 +127,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// IP guard
-	ip, _, blocked, retryAfter := s.deps.IPGuard.Allow(remoteHost(r))
+	ip, _, blocked, retryAfter := s.deps.IPGuard.Allow(axhttp.RealIP(r))
 	if blocked {
 		if !retryAfter.IsZero() {
 			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(time.Until(retryAfter).Seconds())))
 		}
 		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 
-		clientIP := remoteHost(r)
+		clientIP := axhttp.RealIP(r)
 		var cc, cn string
 		if s.deps.GeoIP != nil {
 			geo := s.deps.GeoIP.Lookup(clientIP)
@@ -143,6 +145,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.deps.Stats != nil {
 			s.deps.Stats.RecordRequest(r.Host, true, http.StatusTooManyRequests, 0, 0)
 			s.deps.Stats.RecordAttack(clientIP, cn, cc, "Rate Limit", r.URL.Path)
+			s.deps.Stats.RecordBlockLog(stats.BlockLogEntry{
+				IP:          clientIP,
+				Country:     cn,
+				CountryCode: cc,
+				Method:      r.Method,
+				Host:        r.Host,
+				Path:        r.URL.Path,
+				Rule:        "Rate Limit",
+				Reason:      "IP exceeded concurrent request limit",
+				Severity:    "high",
+				UserAgent:   r.Header.Get("User-Agent"),
+			})
 		}
 		return
 	}
@@ -177,7 +191,7 @@ func (s *Server) buildHandler() error {
 	rp.Director = func(r *http.Request) {
 		baseDirector(r)
 		if cfg.TrustProxyHeaders {
-			clientIP := remoteHost(r)
+			clientIP := axhttp.RealIP(r)
 			if prior := r.Header.Get("X-Forwarded-For"); prior != "" {
 				r.Header.Set("X-Forwarded-For", prior+", "+clientIP)
 			} else {
@@ -313,7 +327,7 @@ func loggingMiddleware(deps *Deps) pipeline.Middleware {
 			next.ServeHTTP(rw, r)
 
 			durationMs := time.Since(start).Milliseconds()
-			clientIP := remoteHost(r)
+			clientIP := axhttp.RealIP(r)
 			requestID := uuid.New().String()
 			userAgent := r.Header.Get("User-Agent")
 
@@ -337,6 +351,23 @@ func loggingMiddleware(deps *Deps) pipeline.Middleware {
 
 			if deps.Stats != nil {
 				deps.Stats.RecordResponseTime(float64(durationMs))
+				deps.Stats.RecordRequestLatency(r.Host, float64(durationMs))
+
+				isBot := botClass != "" && botClass != "human"
+				deps.Stats.RecordAccessLog(stats.AccessLogEntry{
+					IP:          clientIP,
+					Country:     cn,
+					CountryCode: cc,
+					Method:      r.Method,
+					Host:        r.Host,
+					Path:        r.URL.Path,
+					StatusCode:  rw.code,
+					LatencyMs:   float64(durationMs),
+					BytesIn:     r.ContentLength,
+					BytesOut:    int64(rw.written),
+					UserAgent:   userAgent,
+					IsBot:       isBot,
+				})
 			}
 		})
 	}
@@ -383,14 +414,6 @@ func isURLBlocked(path, blocklist string) bool {
 		}
 	}
 	return false
-}
-
-func remoteHost(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func stripPort(hostport string) string {

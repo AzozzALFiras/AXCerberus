@@ -3,12 +3,11 @@ package waf
 import (
 	"bytes"
 	"io"
-	"net"
 	"net/http"
-	"strings"
 
 	"axcerberus/internal/bot"
 	"axcerberus/internal/geoip"
+	axhttp "axcerberus/internal/httputil"
 	"axcerberus/internal/logger"
 	"axcerberus/internal/stats"
 
@@ -40,7 +39,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestID := uuid.New().String()
-	clientIP := realIP(r)
+	clientIP := axhttp.RealIP(r)
 	host := r.Host
 	userAgent := r.Header.Get("User-Agent")
 
@@ -86,6 +85,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.statsEng.RecordRequest(host, true, it.Status, bytesIn, 0)
 			h.statsEng.RecordAttack(clientIP, countryName, countryCode, attackType, r.URL.Path)
 		}
+		h.recordBlock(r.Method, host, r.URL.Path, clientIP, countryName, countryCode, attackType, "request headers", userAgent)
 		http.Error(w, http.StatusText(it.Status), it.Status)
 		return
 	}
@@ -104,6 +104,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					h.statsEng.RecordRequest(host, true, it.Status, bytesIn, 0)
 					h.statsEng.RecordAttack(clientIP, countryName, countryCode, attackType, r.URL.Path)
 				}
+				h.recordBlock(r.Method, host, r.URL.Path, clientIP, countryName, countryCode, attackType, "request body write", userAgent)
 				http.Error(w, http.StatusText(it.Status), it.Status)
 				return
 			}
@@ -119,6 +120,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.statsEng.RecordRequest(host, true, it.Status, bytesIn, 0)
 			h.statsEng.RecordAttack(clientIP, countryName, countryCode, attackType, r.URL.Path)
 		}
+		h.recordBlock(r.Method, host, r.URL.Path, clientIP, countryName, countryCode, attackType, "request body", userAgent)
 		http.Error(w, http.StatusText(it.Status), it.Status)
 		return
 	}
@@ -143,6 +145,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.statsEng.RecordRequest(host, true, it.Status, bytesIn, 0)
 			h.statsEng.RecordAttack(clientIP, countryName, countryCode, attackType, r.URL.Path)
 		}
+		h.recordBlock(r.Method, host, r.URL.Path, clientIP, countryName, countryCode, attackType, "response headers", userAgent)
 		http.Error(w, http.StatusText(it.Status), it.Status)
 		return
 	}
@@ -157,6 +160,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.statsEng.RecordRequest(host, true, it.Status, bytesIn, 0)
 				h.statsEng.RecordAttack(clientIP, countryName, countryCode, attackType, r.URL.Path)
 			}
+			h.recordBlock(r.Method, host, r.URL.Path, clientIP, countryName, countryCode, attackType, "response body", userAgent)
 			http.Error(w, http.StatusText(it.Status), it.Status)
 			return
 		}
@@ -171,6 +175,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.statsEng.RecordRequest(host, true, it.Status, bytesIn, 0)
 			h.statsEng.RecordAttack(clientIP, countryName, countryCode, attackType, r.URL.Path)
 		}
+		h.recordBlock(r.Method, host, r.URL.Path, clientIP, countryName, countryCode, attackType, "response body process", userAgent)
 		http.Error(w, http.StatusText(it.Status), it.Status)
 		return
 	}
@@ -197,21 +202,22 @@ func (h *handler) logBlock(requestID string, ruleID int, phase, clientIP, path, 
 	)
 }
 
-func realIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
+func (h *handler) recordBlock(method, host, path, clientIP, countryName, countryCode, attackType, phase, userAgent string) {
+	if h.statsEng == nil {
+		return
 	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	h.statsEng.RecordBlockLog(stats.BlockLogEntry{
+		IP:          clientIP,
+		Country:     countryName,
+		CountryCode: countryCode,
+		Method:      method,
+		Host:        host,
+		Path:        path,
+		Rule:        attackType,
+		Reason:      "Blocked at " + phase + " phase",
+		Severity:    "critical",
+		UserAgent:   userAgent,
+	})
 }
 
 type responseRecorder struct {

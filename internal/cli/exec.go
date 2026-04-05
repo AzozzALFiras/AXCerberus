@@ -231,6 +231,35 @@ func actionConfigSet(args []string) (any, error) {
 	return map[string]any{"key": key, "value": value, "ok": true}, nil
 }
 
+func getConfigKey(key string) string {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return ""
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+	// Check flat key
+	if v, ok := raw[key]; ok {
+		return fmt.Sprintf("%v", v)
+	}
+	// Check config_schema
+	if schema, ok := raw["config_schema"].([]any); ok {
+		for _, sec := range schema {
+			section, _ := sec.(map[string]any)
+			fields, _ := section["fields"].([]any)
+			for _, f := range fields {
+				field, _ := f.(map[string]any)
+				if field["key"] == key {
+					return fmt.Sprintf("%v", field["value"])
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func setConfigKey(key, value string) error {
 	data, err := os.ReadFile(configFile)
 	if err != nil {

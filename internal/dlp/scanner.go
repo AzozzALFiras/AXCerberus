@@ -2,6 +2,7 @@ package dlp
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -105,8 +106,7 @@ func (s *Scanner) Middleware(next http.Handler) http.Handler {
 			case ModeMask:
 				masked := s.mask(body, matches)
 				rec.buf = bytes.NewBuffer(masked)
-				// Update Content-Length to match masked body size
-				rec.header.Del("Content-Length")
+				rec.header.Set("Content-Length", fmt.Sprintf("%d", len(masked)))
 			// ModeLog: fall through to normal response
 			}
 		}

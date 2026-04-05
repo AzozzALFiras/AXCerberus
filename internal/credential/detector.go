@@ -5,12 +5,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	axhttp "axcerberus/internal/httputil"
 )
 
 // Event represents a login attempt observation.
@@ -79,7 +80,7 @@ func (d *Detector) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ip := extractIP(r)
+		ip := axhttp.RealIP(r)
 
 		// Check if IP is already blocked
 		if d.isBlocked(ip) {
@@ -303,16 +304,3 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
-func extractIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}

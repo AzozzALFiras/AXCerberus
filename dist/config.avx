@@ -11,8 +11,8 @@
                     "key": "listen",
                     "label": "HTTP Listen Address",
                     "type": "string",
-                    "value": ":80",
-                    "description": "Address and port to listen on for HTTP traffic"
+                    "value": "127.0.0.1:8080",
+                    "description": "Address and port to listen on for HTTP traffic (localhost only for security)"
                 },
                 {
                     "key": "listen_tls",
